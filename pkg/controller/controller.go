@@ -133,10 +133,12 @@ type Controller struct {
 	updateNodeQueue workqueue.RateLimitingInterface
 	deleteNodeQueue workqueue.RateLimitingInterface
 
-	servicesLister     v1.ServiceLister
-	serviceSynced      cache.InformerSynced
-	deleteServiceQueue workqueue.RateLimitingInterface
-	updateServiceQueue workqueue.RateLimitingInterface
+	servicesLister      v1.ServiceLister
+	serviceSynced       cache.InformerSynced
+	addServiceQueue     workqueue.RateLimitingInterface
+	deleteServiceQueue  workqueue.RateLimitingInterface
+	updateServiceQueue  workqueue.RateLimitingInterface
+	updateLbSvcPodQueue workqueue.RateLimitingInterface
 
 	endpointsLister     v1.EndpointsLister
 	endpointsSynced     cache.InformerSynced
@@ -305,10 +307,12 @@ func NewController(config *Configuration) *Controller {
 		updateNodeQueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "UpdateNode"),
 		deleteNodeQueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "DeleteNode"),
 
-		servicesLister:     serviceInformer.Lister(),
-		serviceSynced:      serviceInformer.Informer().HasSynced,
-		deleteServiceQueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "DeleteService"),
-		updateServiceQueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "UpdateService"),
+		servicesLister:      serviceInformer.Lister(),
+		serviceSynced:       serviceInformer.Informer().HasSynced,
+		addServiceQueue:     workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "AddService"),
+		deleteServiceQueue:  workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "DeleteService"),
+		updateServiceQueue:  workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "UpdateService"),
+		updateLbSvcPodQueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "updateLbSvcPod"),
 
 		endpointsLister:     endpointInformer.Lister(),
 		endpointsSynced:     endpointInformer.Informer().HasSynced,
@@ -556,9 +560,11 @@ func (c *Controller) shutdown() {
 	c.updateNodeQueue.ShutDown()
 	c.deleteNodeQueue.ShutDown()
 
+	c.addServiceQueue.ShutDown()
 	c.deleteServiceQueue.ShutDown()
 	c.updateServiceQueue.ShutDown()
 	c.updateEndpointQueue.ShutDown()
+	c.updateLbSvcPodQueue.ShutDown()
 
 	c.addVlanQueue.ShutDown()
 	c.delVlanQueue.ShutDown()
@@ -674,8 +680,10 @@ func (c *Controller) startWorkers(stopCh <-chan struct{}) {
 	go wait.Until(c.runUpdateProviderNetworkWorker, time.Second, stopCh)
 
 	if c.config.EnableLb {
+		go wait.Until(c.runAddServiceWorker, time.Second, stopCh)
 		// run in a single worker to avoid delete the last vip, which will lead ovn to delete the loadbalancer
 		go wait.Until(c.runDeleteServiceWorker, time.Second, stopCh)
+		go wait.Until(c.runUpdateLbSvcPodWorker, time.Second, stopCh)
 	}
 
 	for i := 0; i < c.config.WorkerNum; i++ {

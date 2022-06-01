@@ -1153,6 +1153,20 @@ func (c *Controller) getPodAttachmentNet(pod *v1.Pod) ([]*kubeovnNet, error) {
 					break
 				}
 			}
+
+			lsName, lsExist := pod.Annotations[fmt.Sprintf(util.LogicalSwitchAnnotationTemplate, providerName)]
+			if lsExist {
+				subnet, err := c.subnetsLister.Get(lsName)
+				if err != nil {
+					klog.Errorf("failed to get subnet %v", err)
+					return nil, err
+				}
+				result = append(result, &kubeovnNet{
+					Type:         providerTypeIPAM,
+					ProviderName: providerName,
+					Subnet:       subnet,
+				})
+			}
 		}
 	}
 	return result, nil
